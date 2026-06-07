@@ -8,7 +8,7 @@
       "rpc": "https://atlantic.dplabs-internal.com",
       "explorer": "https://testnet.pharosscan.xyz",
       "nativeToken": "PHRS",
-      "leaderboard": "",
+      "leaderboard": "https://leaderboard-five-neon.vercel.app",
       "contracts": {
         "pUSD": "0x3c37a2a0ebe4683f6242189733b352f05641cb73",
         "PharosPayLedger": "0x4ce02b05b3fa4e04404cdaea15c1f82be1781ca8"
