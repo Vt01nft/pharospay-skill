@@ -1,57 +1,52 @@
-# PharosPay — the on-chain reputation + payment rail for AI agents
+# PharosPay
 
-A **Pharos Agent Skill** (`SKILL.md` format) that gives an AI agent a **verifiable on-chain
-reputation it earns by paying.** Every x402 stablecoin payment the agent makes (gasless,
-settled on-chain) raises its **reputation score**, extends its **daily streak**, and moves it
-up a public **leaderboard** — with a **referral** growth loop. x402 is the mechanism; the
-product is agent **identity and trust**.
+A Pharos Agent Skill that gives an AI agent a payment track record that lives on-chain.
 
-> The only Pharos Agent Centre skill that turns payments into earned, on-chain agent reputation.
+When the agent pays for something over x402 (gasless for the agent), the payment is settled by a
+`PharosPayLedger` contract that keeps a reputation score, a daily streak, and a leaderboard
+position. There is a referral that hands both sides some test pUSD. x402 is how the payment
+happens. The reputation is the part that's new.
+
+Most Pharos skills read balances, audit contracts, or launch tokens. This is the one that lets an
+agent build a reputation by paying.
 
 ## Install
 
 ```bash
 npx skills add https://github.com/Vt01nft/pharospay-skill
-export PRIVATE_KEY=0x...            # agent wallet (testnet only)
-cd scripts && npm install          # viem, for the x402 pay script
+export PRIVATE_KEY=0x...            # agent wallet, testnet only
+cd scripts && npm install          # viem, for the pay script
 ```
 
-## Use it (natural language)
+## Use it
 
-> "Pay for the analytics at `https://…/alpha/wallet/0xabc` on Pharos (max 0.05 pUSD), then
-> show me the result, the tx hash, and my updated PharosPay reputation + streak."
+Ask in plain English:
 
-Under the hood:
+> "Pay for the analytics at https://.../alpha/wallet/0xabc on Pharos, spend at most 0.05 pUSD,
+> then show me the result, the tx hash, and my updated PharosPay reputation and streak."
+
+What runs under the hood:
 
 ```bash
-PRIVATE_KEY=$PRIVATE_KEY node scripts/pay.mjs https://…/alpha/wallet/0xabc --max 0.05
+PRIVATE_KEY=$PRIVATE_KEY node scripts/pay.mjs https://.../alpha/wallet/0xabc --max 0.05
 cast call <ledger> "stats(address)(uint256,uint256,uint256,uint256,uint256,uint256)" <addr> --rpc-url $RPC
 ```
 
-→ pays (gasless EIP-3009), returns the resource + a settlement tx on `testnet.pharosscan.xyz`,
-and the payment **raises the agent's on-chain reputation + streak**.
+It pays (gasless EIP-3009), returns the resource and a settlement tx you can open on
+testnet.pharosscan.xyz, and the payment raises the agent's on-chain reputation and streak.
 
-## Capabilities (reputation-first)
+## What's in here
 
-1. **Read/build agent reputation** — score, streak, totals, leaderboard rank.
-2. **Pay for x402 resources** — gasless; each payment earns reputation.
-3. **Referrals** — `claimWithReferrer` grants both sides bonus pUSD.
-4. Supporting on-chain ops — balances, faucet, transfers, reads, deploys via `cast`/`forge`.
+- `SKILL.md`: the skill the agent reads (reputation, payments, referrals, recipes, safety notes).
+- `assets/networks.json`: Pharos Atlantic config (chain id 688689, rpc, explorer, addresses, leaderboard url).
+- `scripts/pay.mjs`: a small, self-contained x402 payer (EIP-3009 plus the `X-PAYMENT` header).
+- `references/recipes.md`: the cast/forge commands and the errors you'll hit.
 
-## Contents
+## The bigger project
 
-- `SKILL.md` — the agent-facing skill (reputation, payments, referrals, recipes, security).
-- `assets/networks.json` — Pharos Atlantic config (chainId 688689, RPC, explorer, addresses, leaderboard URL).
-- `scripts/pay.mjs` — self-contained x402 payer (EIP-3009 + `X-PAYMENT`).
-- `references/recipes.md` — `cast`/`forge` recipes + error handling.
-
-## Why it's different
-
-Of the 40+ Pharos Agent Centre skills, PharosPay is the only one that gives agents an
-**earned, on-chain reputation + streak + leaderboard rank.** Others read or transfer; this
-makes "this agent reliably pays" a verifiable on-chain fact — the trust layer of the agent
-economy. Full system (EIP-3009 stablecoin, settlement+reputation ledger, provider middleware,
-MCP server, a real paid service, a live leaderboard) + tests: **see the main PharosPay repo.**
+This repo is just the skill. The full system it talks to (the pUSD token, the settlement and
+reputation ledger, a provider middleware, an MCP server, a real paid API, a leaderboard, and the
+tests) is here: https://github.com/Vt01nft/pharospay
 
 ## License
 

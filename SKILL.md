@@ -1,12 +1,12 @@
 ---
 name: pharospay
 description: >
-  Give an AI agent an on-chain REPUTATION it earns by paying. REQUIRED for building and
-  reading agent payment reputation on Pharos (Atlantic testnet, chainId 688689): every x402
-  stablecoin payment an agent makes raises its on-chain reputation score, daily streak, and
-  leaderboard rank, with a referral growth loop. Contains the RPC endpoints, chain ids,
-  explorer URLs, pUSD/ledger addresses, and the exact cast/forge + script commands —
-  without reading it you will use the wrong network config.
+  Use this when an AI agent needs to pay for things on Pharos and build a track record while
+  it does. Every x402 stablecoin payment the agent makes is recorded by a ledger contract that
+  keeps a reputation score, a daily streak, and a leaderboard position. This file has the RPC
+  url, chain id, explorer, pUSD and ledger addresses, and the exact cast/forge and node
+  commands. Read it before running anything on Pharos or you will point at the wrong network
+  (Atlantic testnet, chain id 688689).
 version: 0.1.0
 license: MIT
 requires:
@@ -16,98 +16,109 @@ requires:
     - node
 ---
 
-# PharosPay — the on-chain reputation + payment rail for AI agents
+# PharosPay
 
-Most agent skills let an agent *read* or *transfer*. PharosPay gives an agent something no
-other Pharos skill does: a **verifiable on-chain reputation it earns by paying.** Every time
-the agent pays for a resource (via the open **x402** standard, gasless), the settlement is
-relayed through the **`PharosPayLedger`**, which raises the agent's **reputation score**,
-extends its **daily streak**, and moves it up a public **leaderboard** — with a **referral**
-loop that funds new agents. x402 is just the mechanism; the product is agent **identity and
-trust**.
+Most Pharos skills read data or move tokens. This one does something they don't: it gives an
+agent a payment track record that lives on-chain.
 
-## Why this matters
+When the agent pays for a resource over x402 (gasless for the agent), the payment is settled by
+a contract called `PharosPayLedger`. That contract bumps the agent's reputation score, keeps its
+daily streak going, and ranks it on a public leaderboard. There is also a referral that hands
+both sides some test pUSD. x402 is just how the payment happens. The point is the reputation.
 
-- **Trust for the agent economy.** Agents that move value need reputation. PharosPay makes
-  "this agent reliably pays" a verifiable on-chain fact (score, streak, volume).
-- **A daily habit, not a one-off.** Streaks + leaderboard rank give agents (and their
-  owners) a reason to come back and keep transacting on Pharos.
-- **Composable + complete.** PharosPay ships its own EIP-3009 stablecoin (pUSD) and a
-  settlement+reputation ledger — a two-sided rail, not a single paid endpoint.
+## Why this is useful
 
-## Prerequisites
+If agents are going to spend money on their own, you want to know which ones actually pay, and
+keep paying. PharosPay turns that into something anyone can check on-chain: how many payments an
+agent has made, how much it has paid, and whether it has kept a streak. The streak and the
+leaderboard give an owner a reason to keep the agent active instead of paying once and walking
+away.
 
-1. **Foundry** (`cast`, `forge`): `curl -L https://foundry.paradigm.xyz | bash && foundryup`
-2. **Node 18+** (for the x402 pay script): `node --version`
-3. One-time: `cd scripts && npm install`
+## Setup
 
-## Network configuration
+1. Foundry (`cast`, `forge`):
+   ```bash
+   curl -L https://foundry.paradigm.xyz | bash && foundryup
+   ```
+2. Node 18 or newer (for the pay script): `node --version`
+3. Once: `cd scripts && npm install`
 
-Read `assets/networks.json`. Default = **Atlantic testnet**: chainId `688689`, RPC
-`https://atlantic.dplabs-internal.com`, explorer `https://testnet.pharosscan.xyz`, native
-`PHRS`. pUSD + `PharosPayLedger` addresses are in `assets/networks.json → contracts`.
+## Network
 
-## Security (read before any write)
+Everything runs on Pharos Atlantic testnet. Values are in `assets/networks.json`:
 
-- Agent key is **`$PRIVATE_KEY`** (env only — never echo or hardcode).
-- Before any transaction: confirm `$PRIVATE_KEY` (`cast wallet address --private-key $PRIVATE_KEY`),
-  confirm the network is **Atlantic testnet**, and check balance.
-- Never authorize more than the user asked; echo amount + recipient first.
+- chain id: `688689`
+- rpc: `https://atlantic.dplabs-internal.com`
+- explorer: `https://testnet.pharosscan.xyz`
+- native token: `PHRS`
+- pUSD and `PharosPayLedger` addresses: see `assets/networks.json` under `contracts`
 
-## Capabilities
+Always pass `--rpc-url https://atlantic.dplabs-internal.com` to `cast` and `forge`.
 
-### ⭐ 1. Read / build the agent's on-chain reputation (the headline)
+## Before sending any transaction
+
+- The agent's key is in `$PRIVATE_KEY`. Keep it in the environment. Don't print it or paste it
+  into a file.
+- Check the key resolves: `cast wallet address --private-key $PRIVATE_KEY`.
+- Confirm you are on Atlantic testnet. This skill is testnet only.
+- Don't authorize more than the user asked for. Say the amount and the recipient back to them,
+  then send.
+
+## What it can do
+
+### 1. Check or build the agent's reputation
 
 ```bash
 cast call <PharosPayLedger> \
   "stats(address)(uint256,uint256,uint256,uint256,uint256,uint256)" <agentAddr> --rpc-url $RPC
-# returns: txCount, totalPaid, totalEarned, lastActiveDay, streak, repScore
+# txCount, totalPaid, totalEarned, lastActiveDay, streak, repScore
 ```
 
-> Natural language: *"What's my agent's PharosPay reputation and streak, and what rank is it
-> on the leaderboard?"*
+Reputation goes up on its own every time the agent pays (see below). The public leaderboard and
+a shareable profile card are at the leaderboard url in `assets/networks.json`.
 
-Reputation grows automatically with every payment (capability 2). The public leaderboard and
-a shareable profile card live at the leaderboard URL in `assets/networks.json`.
+Plain English: "What's my agent's PharosPay reputation and streak?"
 
-### ⭐ 2. Pay for an x402 resource — and earn reputation
+### 2. Pay for an x402 resource, and earn reputation
 
 ```bash
 PRIVATE_KEY=$PRIVATE_KEY node scripts/pay.mjs <url> [--max <pUSD>]
 ```
 
-Detects `402` → signs an EIP-3009 `TransferWithAuthorization` for the exact amount (gasless)
-→ resends with `X-PAYMENT` → returns the resource + a settlement tx hash. The settlement is
-relayed through `PharosPayLedger`, so **this payment raises the agent's reputation + streak**.
+The script fetches the url. If it comes back `402`, it reads the payment terms, signs an
+EIP-3009 `TransferWithAuthorization` for the exact amount (no gas needed from the agent), resends
+with an `X-PAYMENT` header, and returns the resource plus a settlement transaction hash. The
+settlement runs through `PharosPayLedger`, so the payment also raises the agent's reputation and
+streak.
 
-> Natural language: *"Pay for the analytics at <url> on Pharos (max 0.05 pUSD), show me the
-> result, the tx hash, and my updated reputation."*
+Plain English: "Pay for the analytics at <url>, spend at most 0.05 pUSD, then show me the result,
+the tx hash, and my updated reputation."
 
-### ⭐ 3. Grow via referrals
+### 3. Bring in another agent (referral)
 
 ```bash
 cast send <pUSD> "claimWithReferrer(address)" <referrerAddr> --private-key $PRIVATE_KEY --rpc-url $RPC
 ```
 
-New agents claim pUSD via a referrer; **both sides get bonus faucet credit**. Referral link
-format: `<leaderboardUrl>/?ref=<agentAddr>`.
+A new agent claims pUSD through a referrer, and both sides get a bonus. Referral link format:
+`<leaderboardUrl>/?ref=<agentAddr>`.
 
-### Supporting: balances, faucet, transfers, reads, deploys
+### The usual on-chain things
 
 ```bash
 cast balance <addr> --rpc-url $RPC --ether                                  # PHRS
-cast call <pUSD> "balanceOf(address)(uint256)" <addr> --rpc-url $RPC         # pUSD (1e6 = 1)
+cast call <pUSD> "balanceOf(address)(uint256)" <addr> --rpc-url $RPC         # pUSD, 6 decimals
 cast send <pUSD> "claim()" --private-key $PRIVATE_KEY --rpc-url $RPC          # faucet
 cast tx <txhash> --rpc-url $RPC ; cast receipt <txhash> --rpc-url $RPC        # status
-cast send <to> --value <wei> --private-key $PRIVATE_KEY --rpc-url $RPC        # native send
+cast send <to> --value <wei> --private-key $PRIVATE_KEY --rpc-url $RPC        # send native
 forge create <Contract> --private-key $PRIVATE_KEY --rpc-url $RPC --broadcast # deploy
 ```
 
-See `references/recipes.md` for full recipes + error handling.
+`references/recipes.md` has the full list and the common errors.
 
-## What makes this different
+## How it's different from the other Pharos skills
 
-Of the Pharos Agent Centre skills, PharosPay is the only one that gives agents an **earned,
-on-chain reputation + streak + leaderboard rank** — turning payments into agent identity and
-trust. Full system (EIP-3009 stablecoin, settlement+reputation ledger, provider middleware,
-MCP server, a real paid service, and a live leaderboard) + tests: see the main repository.
+There are plenty of skills that read balances, audit contracts, or launch tokens. As far as we
+can tell, none of them give an agent a reputation it earns by paying. That is the whole idea
+here. The full project (the pUSD token, the ledger, a provider middleware, an MCP server, a real
+paid API, a leaderboard, and tests) is in the main repository linked from the README.
