@@ -1,0 +1,18 @@
+{
+  "default": "atlantic",
+  "networks": {
+    "atlantic": {
+      "name": "Pharos Atlantic Testnet",
+      "display_en": "Atlantic Testnet",
+      "chainId": 688689,
+      "rpc": "https://atlantic.dplabs-internal.com",
+      "explorer": "https://testnet.pharosscan.xyz",
+      "nativeToken": "PHRS",
+      "leaderboard": "",
+      "contracts": {
+        "pUSD": "",
+        "PharosPayLedger": ""
+      }
+    }
+  }
+}
