@@ -49,7 +49,32 @@ const safe = async (r) => {
   }
 };
 
+// SSRF guard (CWE-918): refuse non-http(s) schemes and private/internal hosts so the agent
+// cannot be steered into cloud metadata or localhost. Set PHAROSPAY_ALLOW_LOCAL=1 for local dev.
+function isPrivateHost(host) {
+  const h = host.replace(/^\[|\]$/g, "");
+  if (h === "localhost" || h.endsWith(".localhost") || h === "0.0.0.0" || h === "::1" || h === "::") return true;
+  const m = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (m) {
+    const a = Number(m[1]), b = Number(m[2]);
+    if (a === 0 || a === 127 || a === 10) return true;
+    if (a === 169 && b === 254) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 100 && b >= 64 && b <= 127) return true;
+  }
+  return h.startsWith("fe80") || h.startsWith("fc") || h.startsWith("fd");
+}
+function assertSafeUrl(raw) {
+  let u;
+  try { u = new URL(raw); } catch { throw new Error(`invalid url: ${raw}`); }
+  if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error(`refusing url scheme ${u.protocol} (http/https only)`);
+  if (process.env.PHAROSPAY_ALLOW_LOCAL === "1") return;
+  if (isPrivateHost(u.hostname.toLowerCase())) throw new Error(`refusing private/internal address: ${u.hostname}`);
+}
+
 async function main() {
+  assertSafeUrl(url);
   const first = await fetch(url);
   if (first.status !== 402) {
     console.log(JSON.stringify({ status: first.status, data: await safe(first) }, null, 2));
