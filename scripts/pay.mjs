@@ -8,6 +8,8 @@ import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const nets = JSON.parse(readFileSync(join(here, "..", "assets", "networks.json"), "utf8"));
@@ -49,33 +51,71 @@ const safe = async (r) => {
   }
 };
 
-// SSRF guard (CWE-918): refuse non-http(s) schemes and private/internal hosts so the agent
-// cannot be steered into cloud metadata or localhost. Set PHAROSPAY_ALLOW_LOCAL=1 for local dev.
-function isPrivateHost(host) {
-  const h = host.replace(/^\[|\]$/g, "");
-  if (h === "localhost" || h.endsWith(".localhost") || h === "0.0.0.0" || h === "::1" || h === "::") return true;
-  const m = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (m) {
-    const a = Number(m[1]), b = Number(m[2]);
-    if (a === 0 || a === 127 || a === 10) return true;
-    if (a === 169 && b === 254) return true;
-    if (a === 192 && b === 168) return true;
-    if (a === 172 && b >= 16 && b <= 31) return true;
-    if (a === 100 && b >= 64 && b <= 127) return true;
-  }
-  return h.startsWith("fe80") || h.startsWith("fc") || h.startsWith("fd");
+// SSRF guard (CWE-918): refuse non-http(s) schemes and private/internal targets so the agent
+// cannot be steered into cloud metadata or internal services. WHATWG URL normalization handles
+// hex/octal/decimal IPv4; DNS resolution catches hostnames that point at internal IPs; redirects
+// are re-checked on every hop. Set PHAROSPAY_ALLOW_LOCAL=1 to allow localhost during local dev.
+function ipv4Blocked(ip) {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip);
+  if (!m) return false;
+  const a = Number(m[1]), b = Number(m[2]);
+  if (a === 0 || a === 127 || a === 10) return true;
+  if (a === 169 && b === 254) return true; // link-local + cloud metadata (169.254.169.254)
+  if (a === 192 && b === 168) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
+  if (a >= 224) return true; // multicast + reserved
+  return false;
 }
-function assertSafeUrl(raw) {
+function ipv6Blocked(ip) {
+  const h = ip.toLowerCase();
+  if (h === "::1" || h === "::") return true;
+  if (h.startsWith("fe80") || h.startsWith("fc") || h.startsWith("fd")) return true;
+  const map = /^::ffff:(.+)$/.exec(h); // IPv4-mapped IPv6
+  if (map) {
+    if (map[1].includes(".")) return ipv4Blocked(map[1]);
+    const parts = map[1].split(":");
+    if (parts.length === 2) {
+      const hi = parseInt(parts[0], 16) || 0;
+      const lo = parseInt(parts[1], 16) || 0;
+      return ipv4Blocked(`${(hi >> 8) & 255}.${hi & 255}.${(lo >> 8) & 255}.${lo & 255}`);
+    }
+  }
+  return false;
+}
+function hostBlocked(host) {
+  const h = host.replace(/^\[|\]$/g, "").toLowerCase();
+  if (h === "localhost" || h.endsWith(".localhost")) return true;
+  const fam = isIP(h);
+  if (fam === 4) return ipv4Blocked(h);
+  if (fam === 6) return ipv6Blocked(h);
+  return false;
+}
+async function assertSafeUrl(raw) {
   let u;
   try { u = new URL(raw); } catch { throw new Error(`invalid url: ${raw}`); }
   if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error(`refusing url scheme ${u.protocol} (http/https only)`);
   if (process.env.PHAROSPAY_ALLOW_LOCAL === "1") return;
-  if (isPrivateHost(u.hostname.toLowerCase())) throw new Error(`refusing private/internal address: ${u.hostname}`);
+  const host = u.hostname.replace(/^\[|\]$/g, "");
+  if (hostBlocked(host)) throw new Error(`refusing private/internal address: ${u.hostname}`);
+  if (isIP(host)) return; // literal already checked
+  let addrs;
+  try { addrs = await lookup(host, { all: true }); } catch { throw new Error(`could not resolve host: ${host}`); }
+  for (const a of addrs) if (hostBlocked(a.address)) throw new Error(`${host} resolves to a private/internal address (${a.address})`);
+}
+const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308]);
+async function safeFetch(target, init = {}, depth = 0) {
+  await assertSafeUrl(target);
+  const res = await fetch(target, { ...init, redirect: "manual" });
+  if (REDIRECT_STATUS.has(res.status) && depth < 5) {
+    const loc = res.headers.get("location");
+    if (loc) return safeFetch(new URL(loc, target).href, init, depth + 1);
+  }
+  return res;
 }
 
 async function main() {
-  assertSafeUrl(url);
-  const first = await fetch(url);
+  const first = await safeFetch(url);
   if (first.status !== 402) {
     console.log(JSON.stringify({ status: first.status, data: await safe(first) }, null, 2));
     return;
@@ -113,7 +153,7 @@ async function main() {
   const payload = { x402Version: 1, scheme: "exact", network: req.network, asset: req.asset, authorization: auth, signature };
   const header = Buffer.from(JSON.stringify(payload)).toString("base64");
 
-  const second = await fetch(url, { headers: { "X-PAYMENT": header } });
+  const second = await safeFetch(url, { headers: { "X-PAYMENT": header } });
   const respHeader = second.headers.get("X-PAYMENT-RESPONSE");
   const resp = respHeader ? JSON.parse(Buffer.from(respHeader, "base64").toString("utf8")) : {};
 
